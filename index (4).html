@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TURBO RACE</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#080d18;color:white;font-family:Arial,sans-serif;overflow:hidden}
+#game{width:100%;height:100vh;position:relative;background:linear-gradient(#152c42,#07101d);overflow:hidden}
+#hud{position:absolute;top:15px;width:100%;display:flex;justify-content:space-around;z-index:5;font-size:17px;font-weight:bold;pointer-events:none}
+.stat{background:#101d30dd;padding:12px 18px;border:1px solid #00eaff;border-radius:12px;box-shadow:0 0 12px #00d9ff55}
+canvas{width:100%;height:100%;display:block}
+#menu,#gameover{position:absolute;inset:0;background:#050b16ef;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:10;text-align:center;padding:20px}
+#gameover{display:none}
+h1{font-size:clamp(38px,8vw,75px);color:#00eaff;text-shadow:0 0 20px #00aaff;margin-bottom:15px}
+#menu p,#gameover p{color:#b8d5e9;margin:8px}
+button{border:0;padding:14px 30px;margin:10px;border-radius:12px;background:linear-gradient(90deg,#00bfff,#006aff);color:white;font-size:18px;font-weight:bold;cursor:pointer}
+button:hover{transform:scale(1.06)}
+#controls{position:absolute;bottom:20px;width:100%;display:flex;justify-content:space-between;padding:0 30px;z-index:6;pointer-events:none}
+.control{width:75px;height:75px;border-radius:50%;background:#00bfff66;border:2px solid #00eaff;font-size:30px;color:white;pointer-events:auto;touch-action:none}
+</style>
+</head>
+<body>
+<div id="game">
+<div id="hud">
+ <div class="stat">🏆 <span id="score">0</span></div>
+ <div class="stat">🪙 <span id="coins">0</span></div>
+ <div class="stat">⚡ LVL <span id="level">1</span></div>
+</div>
+<canvas id="canvas"></canvas>
+<div id="menu">
+ <h1>TURBO RACE</h1>
+ <p>🏎️ Tezlikti sınap kór!</p>
+ <p>Teńgelerdi jıyna hám basqa mashinalardan saqlan.</p>
+ <p>← → yamasa A D túymelerin bas.</p>
+ <button onclick="startGame()">OYINDI BASLAW ▶</button>
+ <p>Rekord: <span id="best">0</span></p>
+</div>
+<div id="gameover">
+ <h1>GAME OVER</h1>
+ <p>Toplaǵan ball: <span id="finalScore">0</span></p>
+ <button onclick="startGame()">QAYTA OYNA ↻</button>
+</div>
+<div id="controls">
+ <button class="control" id="left">◀</button>
+ <button class="control" id="right">▶</button>
+</div>
+</div>
+<script>
+const canvas=document.getElementById("canvas");
+const ctx=canvas.getContext("2d");
+let W,H;
+function resize(){W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight;}
+window.addEventListener("resize",resize);resize();
+let running=false,score=0,coins=0,level=1,speed=5,roadOffset=0;
+let obstacles=[],money=[],player={x:0,y:0,w:42,h:75};
+let keys={left:false,right:false},spawn=0,coinSpawn=0;
+let best=Number(localStorage.getItem("turboBest")||0);
+document.getElementById("best").textContent=best;
+function roadWidth(){return Math.min(W*0.78,520)}
+function roadLeft(){return (W-roadWidth())/2}
+function drawRoad(){
+ let rw=roadWidth(),rl=roadLeft();
+ ctx.fillStyle="#183b29";ctx.fillRect(0,0,W,H);
+ ctx.fillStyle="#303943";ctx.fillRect(rl,0,rw,H);
+ ctx.fillStyle="#f4f4f4";ctx.fillRect(rl+8,0,5,H);ctx.fillRect(rl+rw-13,0,5,H);
+ roadOffset+=speed;if(roadOffset>90)roadOffset=0;
+ for(let y=-90;y<H;y+=90){ctx.fillStyle="#eee";ctx.fillRect(W/2-3,y+roadOffset,6,48)}
+ for(let y=-60;y<H;y+=100){ctx.fillStyle="#ffe36b";ctx.fillRect(rl-14,y+roadOffset,5,18);ctx.fillRect(rl+rw+9,y+roadOffset,5,18)}
+}
+function drawCar(x,y,color,isPlayer=false){
+ ctx.save();ctx.translate(x,y);
+ ctx.fillStyle="#080b10";ctx.fillRect(-23,-25,8,22);ctx.fillRect(15,-25,8,22);ctx.fillRect(-23,25,8,22);ctx.fillRect(15,25,8,22);
+ let g=ctx.createLinearGradient(-20,0,20,0);g.addColorStop(0,"#222");g.addColorStop(.5,color);g.addColorStop(1,"#111");
+ ctx.fillStyle=g;ctx.beginPath();ctx.roundRect(-19,-36,38,72,9);ctx.fill();
+ ctx.fillStyle="#182f43";ctx.beginPath();ctx.roundRect(-14,-23,28,23,5);ctx.fill();
+ ctx.fillStyle="#91eaff";ctx.fillRect(-12,-19,24,10);ctx.fillStyle="#101b25";ctx.fillRect(-13,5,26,15);
+ ctx.fillStyle="#fff";ctx.fillRect(-15,-34,8,5);ctx.fillRect(7,-34,8,5);
+ ctx.fillStyle="#ff2020";ctx.fillRect(-14,29,8,5);ctx.fillRect(6,29,8,5);
+ if(isPlayer){ctx.shadowColor=color;ctx.shadowBlur=20;ctx.strokeStyle=color;ctx.lineWidth=2;ctx.stroke()}
+ ctx.restore();
+}
+function drawCoin(c){
+ ctx.save();ctx.translate(c.x,c.y);ctx.fillStyle="#ffd700";ctx.shadowColor="#ffcc00";ctx.shadowBlur=15;
+ ctx.beginPath();ctx.arc(0,0,12,0,Math.PI*2);ctx.fill();ctx.fillStyle="#9c6900";ctx.font="bold 16px Arial";ctx.textAlign="center";ctx.fillText("$",0,6);ctx.restore();
+}
+function update(){
+ if(!running)return;
+ let rl=roadLeft(),rw=roadWidth();
+ if(keys.left)player.x-=7;if(keys.right)player.x+=7;
+ player.x=Math.max(rl+35,Math.min(rl+rw-35,player.x));
+ speed=5+level*.7;spawn++;coinSpawn++;
+ if(spawn>Math.max(28,85-level*5)){obstacles.push({x:rl+45+Math.random()*(rw-90),y:-90,color:["#ff3434","#27bfff","#f5a623","#a75bff"][Math.floor(Math.random()*4)]});spawn=0}
+ if(coinSpawn>65){money.push({x:rl+40+Math.random()*(rw-80),y:-20});coinSpawn=0}
+ obstacles.forEach(o=>o.y+=speed);money.forEach(c=>c.y+=speed);
+ obstacles=obstacles.filter(o=>o.y<H+100);money=money.filter(c=>c.y<H+30);
+ for(let o of obstacles){if(Math.abs(player.x-o.x)<38&&Math.abs(player.y-o.y)<62){endGame();return}}
+ money=money.filter(c=>{if(Math.abs(player.x-c.x)<35&&Math.abs(player.y-c.y)<45){coins++;score+=50;return false}return true});
+ score+=.15;level=Math.floor(score/400)+1;
+ document.getElementById("score").textContent=Math.floor(score);
+ document.getElementById("coins").textContent=coins;
+ document.getElementById("level").textContent=level;
+}
+function render(){
+ ctx.clearRect(0,0,W,H);drawRoad();
+ obstacles.forEach(o=>drawCar(o.x,o.y,o.color));money.forEach(drawCoin);
+ if(running)drawCar(player.x,player.y,"#00eaff",true);
+}
+function startGame(){
+ score=0;coins=0;level=1;speed=5;obstacles=[];money=[];spawn=0;coinSpawn=0;
+ player.x=W/2;player.y=H-120;running=true;
+ document.getElementById("menu").style.display="none";
+ document.getElementById("gameover").style.display="none";
+}
+function endGame(){
+ running=false;let final=Math.floor(score);
+ if(final>best){best=final;localStorage.setItem("turboBest",best)}
+ document.getElementById("best").textContent=best;
+ document.getElementById("finalScore").textContent=final;
+ document.getElementById("gameover").style.display="flex";
+}
+document.addEventListener("keydown",e=>{if(e.key==="ArrowLeft"||e.key.toLowerCase()==="a")keys.left=true;if(e.key==="ArrowRight"||e.key.toLowerCase()==="d")keys.right=true});
+document.addEventListener("keyup",e=>{if(e.key==="ArrowLeft"||e.key.toLowerCase()==="a")keys.left=false;if(e.key==="ArrowRight"||e.key.toLowerCase()==="d")keys.right=false});
+function hold(id,key){
+ const el=document.getElementById(id);
+ el.addEventListener("pointerdown",e=>{e.preventDefault();keys[key]=true});
+ for(const ev of ["pointerup","pointerleave","pointercancel"])el.addEventListener(ev,()=>keys[key]=false);
+}
+hold("left","left");hold("right","right");
+function loop(){update();render();requestAnimationFrame(loop)}
+loop();
+</script>
+</body>
+</html>
